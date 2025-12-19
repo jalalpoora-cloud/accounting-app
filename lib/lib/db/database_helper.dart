@@ -9,8 +9,8 @@ import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/invoice.dart';
 import '../models/check.dart';
-import '../models/inventory_transaction.dart';
 import '../models/payment.dart';
+import '../models/inventory_transaction.dart';
 
 class DatabaseHelper {
   static DatabaseHelper? _instance;
@@ -69,9 +69,9 @@ class DatabaseHelper {
         amount REAL,
         due_date TEXT,
         bank TEXT,
-        status TEXT DEFAULT 'pending',  -- pending, paid, bounced
+        status TEXT DEFAULT 'pending',
         customer_id INTEGER,
-        type TEXT,  -- received or issued
+        type TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers (id)
       )
     ''');
@@ -81,7 +81,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id INTEGER,
         amount REAL,
-        payment_type TEXT,  -- cash, check, installment
+        payment_type TEXT,
         date TEXT,
         description TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers (id)
@@ -93,7 +93,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id INTEGER,
         quantity INTEGER,
-        type TEXT,  -- in or out
+        type TEXT,
         reason TEXT,
         date TEXT,
         FOREIGN KEY (product_id) REFERENCES products (id)
@@ -101,7 +101,7 @@ class DatabaseHelper {
     ''');
   }
 
-  // ==== Customers ====
+  // Customers
   Future<int> insertCustomer(Customer customer) async {
     Database db = await database;
     return await db.insert('customers', customer.toMap());
@@ -118,7 +118,7 @@ class DatabaseHelper {
     return await db.update('customers', customer.toMap(), where: 'id = ?', whereArgs: [customer.id]);
   }
 
-  // ==== Products ====
+  // Products
   Future<int> insertProduct(Product product) async {
     Database db = await database;
     return await db.insert('products', product.toMap());
@@ -133,9 +133,7 @@ class DatabaseHelper {
   Future<Product?> getProductByBarcode(String barcode) async {
     Database db = await database;
     List<Map<String, dynamic>> maps = await db.query('products', where: 'barcode = ?', whereArgs: [barcode]);
-    if (maps.isNotEmpty) {
-      return Product.fromMap(maps.first);
-    }
+    if (maps.isNotEmpty) return Product.fromMap(maps.first);
     return null;
   }
 
@@ -144,10 +142,74 @@ class DatabaseHelper {
     return await db.update('products', product.toMap(), where: 'id = ?', whereArgs: [product.id]);
   }
 
-  // ==== Invoices, Checks, Payments, Inventory ====
-  // (متدهای دیگه مثل insertInvoice, insertCheck, insertPayment, insertTransaction و ... رو در فایل‌های بعدی اضافه می‌کنیم)
+  // Invoices
+  Future<int> insertInvoice(Invoice invoice) async {
+    Database db = await database;
+    Map<String, dynamic> map = invoice.toMap();
+    map['items'] = jsonEncode(map['items']);
+    return await db.insert('invoices', map);
+  }
 
-  // پشتیبان‌گیری ساده
+  Future<List<Invoice>> getInvoices() async {
+    Database db = await database;
+    List<Map<String, dynamic>> maps = await db.query('invoices');
+    List<Product> allProducts = await getProducts();
+    return List.generate(maps.length, (i) {
+      Map<String, dynamic> map = Map.from(maps[i]);
+      map['items'] = jsonDecode(map['items']);
+      return Invoice.fromMap(map, allProducts);
+    });
+  }
+
+  // Checks
+  Future<int> insertCheck(Check check) async {
+    Database db = await database;
+    return await db.insert('checks', check.toMap());
+  }
+
+  Future<int> updateCheck(Check check) async {
+    Database db = await database;
+    return await db.update('checks', check.toMap(), where: 'id = ?', whereArgs: [check.id]);
+  }
+
+  Future<List<Check>> getChecks() async {
+    Database db = await database;
+    List<Map<String, dynamic>> maps = await db.query('checks');
+    return List.generate(maps.length, (i) => Check.fromMap(maps[i]));
+  }
+
+  // Payments
+  Future<int> insertPayment(Payment payment) async {
+    Database db = await database;
+    return await db.insert('payments', payment.toMap());
+  }
+
+  // Inventory Transactions
+  Future<int> insertTransaction(InventoryTransaction transaction) async {
+    Database db = await database;
+    int id = await db.insert('inventory_transactions', transaction.toMap());
+
+    // بروزرسانی موجودی کالا
+    Product? product = await getProductById(transaction.productId);
+    if (product != null) {
+      if (transaction.type == 'in') {
+        product.quantity += transaction.quantity.abs();
+      } else {
+        product.quantity -= transaction.quantity.abs();
+      }
+      await updateProduct(product);
+    }
+    return id;
+  }
+
+  Future<Product?> getProductById(int id) async {
+    Database db = await database;
+    List<Map<String, dynamic>> maps = await db.query('products', where: 'id = ?', whereArgs: [id]);
+    if (maps.isNotEmpty) return Product.fromMap(maps.first);
+    return null;
+  }
+
+  // پشتیبان‌گیری
   Future<String> backup() async {
     var dbPath = join(await getDatabasesPath(), 'accounting.db');
     var backupDir = await getApplicationDocumentsDirectory();
